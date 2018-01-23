@@ -1317,7 +1317,7 @@ impl Peer {
         last_index <= status.progress[&peer_id].matched + TRANSFER_LEADER_ALLOW_LOG_LAG
     }
 
-    fn read_local(&mut self, req: RaftCmdRequest, cb: Callback, metrics: &mut RaftProposeMetrics) {
+    fn read_local(&mut self, req: RaftCmdRequest, cb: Callback, metrics: &mut RaftProposeMetrics) {//DHQ: 要不要ts呢？已经commit而没有apply的怎么处理？
         metrics.local_read += 1;
         cb(self.handle_read(req));
     }

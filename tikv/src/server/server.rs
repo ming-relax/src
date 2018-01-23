@@ -139,7 +139,7 @@ impl<T: RaftStoreRouter, S: StoreAddrResolver + 'static> Server<T, S> {
     pub fn transport(&self) -> ServerTransport<T, S> {
         self.trans.clone()
     }
-
+    //DHQ: server.start()，主要是网络endpoint (grpc)服务启动。不包含存储相关逻辑
     pub fn start(&mut self, cfg: Arc<Config>, security_mgr: Arc<SecurityManager>) -> Result<()> {
         let end_point = EndPointHost::new(
             self.storage.get_engine(),

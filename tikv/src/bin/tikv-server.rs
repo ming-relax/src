@@ -145,7 +145,7 @@ fn check_system_config(config: &TiKvConfig) {
         warn!("environment variable `TZ` is missing, use `/etc/localtime`");
     }
 }
-//DHQ: 前面完成了config信息收集，这里开始run
+//DHQ: 前面完成了config信息收集，这里开始run server
 fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<SecurityManager>) {
     let store_path = Path::new(&cfg.storage.data_dir);
     let lock_path = store_path.join(Path::new("LOCK"));
@@ -171,9 +171,9 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     let raft_router = ServerRaftStoreRouter::new(store_sendch.clone(), significant_msg_sender);
 
     // Create kv engine, storage.
-    let kv_db_opts = cfg.rocksdb.build_opt();
+    let kv_db_opts = cfg.rocksdb.build_opt(); //DHQ: rocksdb的 options准备
     let kv_cfs_opts = cfg.rocksdb.build_cf_opts();
-    let kv_engine = Arc::new(
+    let kv_engine = Arc::new( //DHQ:  打开 rocksdb
         rocksdb_util::new_engine_opt(db_path.to_str().unwrap(), kv_db_opts, kv_cfs_opts)
             .unwrap_or_else(|s| fatal!("failed to create kv engine: {:?}", s)),
     );
@@ -183,7 +183,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     // Create raft engine.
     let raft_db_opts = cfg.raftdb.build_opt();
     let raft_db_cf_opts = cfg.raftdb.build_cf_opts();
-    let raft_engine = Arc::new(//DHQ:不同engine，参数有不同，比如cf
+    let raft_engine = Arc::new(//DHQ:不同kv engine，参数有不同，比如cf, 这个是raft的log等 存储
         rocksdb_util::new_engine_opt(
             raft_db_path.to_str().unwrap(),
             raft_db_opts,
@@ -193,7 +193,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     let engines = Engines::new(kv_engine.clone(), raft_engine.clone());
 
     // Create pd client and pd work, snapshot manager, server.
-    let pd_client = Arc::new(pd_client);//DHQ:高了个Arc的pd_client
+    let pd_client = Arc::new(pd_client);//DHQ:Arc的pd_client
     let pd_worker = FutureWorker::new("pd worker");
     let (mut worker, resolver) = resolve::new_resolver(pd_client.clone())
         .unwrap_or_else(|e| fatal!("failed to start address resolver: {:?}", e));
@@ -231,7 +231,7 @@ fn run_raft_server(pd_client: RpcClient, cfg: &TiKvConfig, security_mgr: Arc<Sec
     // Create CoprocessorHost.
     let coprocessor_host = CoprocessorHost::new(cfg.coprocessor.clone(), node.get_sendch());
 
-    node.start(
+    node.start( //DHQ: 与server.start()，分工有啥不同？
         event_loop,
         engines.clone(),
         trans,
@@ -453,9 +453,9 @@ fn main() {
         process::exit(0);
     }
 
-    let mut config = matches.value_of("config").map_or_else(//path=value_of("config")，如果name是不为None，执行File::open(name).unrap_or_else(),否则就等于TiKvConfig::default
-        TiKvConfig::default,
-        |path| {
+    let mut config = matches.value_of("config").map_or_else(//DHQ: path=value_of("config")，如果name是不为None，执行File::open(name).unrap_or_else(),否则就等于TiKvConfig::default
+        TiKvConfig::default, //DHQ: config.is_none() 成立,执行这个
+        |path| { //DHQ: path就是config的值，在config非空时
             File::open(&path)
                 .map_err::<Box<Error>, _>(|e| Box::new(e))
                 .and_then(|mut f| {
@@ -494,7 +494,7 @@ fn main() {
     // Before any startup, check system configuration.
     check_system_config(&config);
 
-    let security_mgr = Arc::new(
+    let security_mgr = Arc::new(//DHQ: 跨线程使用的指针，使用Arc (Atomic Ref Count)
         SecurityManager::new(&config.security)
             .unwrap_or_else(|e| fatal!("failed to create security manager: {:?}", e)),
     );

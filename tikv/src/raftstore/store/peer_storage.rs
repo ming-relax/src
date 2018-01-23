@@ -1340,7 +1340,7 @@ pub fn write_initial_apply_state<T: Mutable>(
     Ok(())
 }
 
-pub fn write_peer_state<T: Mutable>(
+pub fn write_peer_state<T: Mutable>(//DHQ: 写这个的目的是啥？持久化了
     kv_engine: &DB,
     kv_wb: &T,
     region: &metapb::Region,
@@ -1356,7 +1356,7 @@ pub fn write_peer_state<T: Mutable>(
     Ok(())
 }
 
-impl Storage for PeerStorage {
+impl Storage for PeerStorage {//DHQ: raft要求实现的各种方法。注意这些数据的持久化
     fn initial_state(&self) -> raft::Result<RaftState> {
         self.initial_state()
     }

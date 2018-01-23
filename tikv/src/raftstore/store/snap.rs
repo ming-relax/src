@@ -955,7 +955,7 @@ impl Snapshot for Snap {
                 let mut file = box_try!(File::open(&cf_file.path));
                 apply_plain_cf_file(&mut file, &options, cf_handle)?;
             } else {
-                let ingest_opt = IngestExternalFileOptions::new();
+                let ingest_opt = IngestExternalFileOptions::new(); //DHQ: Ingest file
                 // TODO: move SST file instead of copy
                 // after changing logic in raft, ask for resending snapshot if applying fail.
                 // ingest_opt.move_files(true);
@@ -970,7 +970,7 @@ impl Snapshot for Snap {
         Ok(())
     }
 }
-
+//DHQ: 实现读文件的方法。还有Write等
 impl Read for Snap {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if buf.is_empty() {

@@ -134,9 +134,9 @@ where
         T: Transport + 'static,
     {
         let bootstrapped = self.check_cluster_bootstrapped()?;
-        let mut store_id = self.check_store(&engines)?;
+        let mut store_id = self.check_store(&engines)?;//DHQ: 检查engine里面的配置信息
         if store_id == INVALID_ID {
-            store_id = self.bootstrap_store(&engines)?;
+            store_id = self.bootstrap_store(&engines)?; //DHQ: 这个在bootstrap_cluster前面，因为它是本地可完成的
         } else if !bootstrapped {
             // We have saved data before, and the cluster must be bootstrapped.
             return Err(box_err!(

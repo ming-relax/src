@@ -35,7 +35,7 @@ fn is_range_empty(engine: &DB, cf: &str, start_key: &[u8], end_key: &[u8]) -> Re
 
     Ok(count == 0)
 }
-
+//DHQ: 这里不需要额外的恢复过程，估计因为还没到 raft 恢复阶段
 // Bootstrap the store, the DB for this store must be empty and has no data.
 pub fn bootstrap_store(engines: &Engines, cluster_id: u64, store_id: u64) -> Result<()> {
     let mut ident = StoreIdent::new();
