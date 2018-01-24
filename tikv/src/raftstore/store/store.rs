@@ -1066,28 +1066,28 @@ impl<T: Transport, C: PdClient> Store<T, C> {
         Ok(None)
     }
 
-    fn on_raft_ready(&mut self) {
+    fn on_raft_ready(&mut self) {//DHQ: 处理整个store的Ready
         let t = SlowTimer::new();
         let pending_count = self.pending_raft_groups.len();
         let previous_ready_metrics = self.raft_metrics.ready.clone();
 
         self.raft_metrics.ready.pending_region += pending_count as u64;
 
-        let mut region_proposals = Vec::with_capacity(pending_count);
-        let (kv_wb, raft_wb, append_res, sync_log) = {
+        let mut region_proposals = Vec::with_capacity(pending_count);//DHQ: 这个pending_count，限制与follower差异？
+        let (kv_wb, raft_wb, append_res, sync_log) = {//DHQ: 遍历pending_raft_groups，把需要执行写操作分类出来，放到几个列表中，这样可以聚集操作. append_res包含了各个region的Ready列表
             let mut ctx = ReadyContext::new(&mut self.raft_metrics, &self.trans, pending_count);
             for region_id in self.pending_raft_groups.drain() {
                 if let Some(peer) = self.region_peers.get_mut(&region_id) {
-                    if let Some(region_proposal) = peer.take_apply_proposals() {//DHQ:notify会放请求，这里take
+                    if let Some(region_proposal) = peer.take_apply_proposals() {//DHQ:其实不是apply，就是proposals(可能包含conf change proposal)，取出来
                         region_proposals.push(region_proposal);
                     }
-                    peer.handle_raft_ready_append(&mut ctx, &self.pd_worker);//DHQ: ctx里面包含了各种操作
+                    peer.handle_raft_ready_append(&mut ctx, &self.pd_worker);//DHQ: 先处理append entry. ctx里面包含了各种操作
                 }
-            }
-            (ctx.kv_wb, ctx.raft_wb, ctx.ready_res, ctx.sync_log)//DHQ: 返回ctx的各种操作
+            }//DHQ:ready_res，包含了各个region的Ready列表. kv_wb和raft_wb是所有的写，聚集
+            (ctx.kv_wb, ctx.raft_wb, ctx.ready_res, ctx.sync_log)
         };
 
-        if !region_proposals.is_empty() {
+        if !region_proposals.is_empty() { 
             self.apply_worker
                 .schedule(ApplyTask::Proposals(region_proposals))
                 .unwrap();
@@ -1129,13 +1129,13 @@ impl<T: Transport, C: PdClient> Store<T, C> {
         fail_point!("raft_after_save");
 
         let mut ready_results = Vec::with_capacity(append_res.len());
-        for (mut ready, invoke_ctx) in append_res {
+        for (mut ready, invoke_ctx) in append_res {//DHQ: append_res上的各个region，可能有了新的ready(applysnapshot完成）,与之前的ready一起，放到ready_results里面。res为apply snapshot的Ready消息
             let region_id = invoke_ctx.region_id;
             let res =
                 self.region_peers
                     .get_mut(&region_id)
                     .unwrap()
-                    .post_raft_ready_append(
+                    .post_raft_ready_append(//DHQ: post处理，例如，apply snapshot有进展，可以准备reply消息，也放到trans，后续发送
                         &mut self.raft_metrics,
                         &self.trans,
                         &mut ready,
@@ -1165,13 +1165,13 @@ impl<T: Transport, C: PdClient> Store<T, C> {
             self.region_peers
                 .get_mut(&region_id)
                 .unwrap()
-                .handle_raft_ready_apply(ready, &mut apply_tasks);//DHQ:ready_apply，会处理读，apply_read
-            if let Some(apply_result) = res {
+                .handle_raft_ready_apply(ready, &mut apply_tasks);//DHQ: ready for apply的，即committed_entries，再抽取出来，放到apply_tasks
+            if let Some(apply_result) = res {//DHQ: snapshot单独处理
                 self.on_ready_apply_snapshot(apply_result);
             }
         }
         self.apply_worker
-            .schedule(ApplyTask::applies(apply_tasks))//DHQ: 只有一次schedule
+            .schedule(ApplyTask::applies(apply_tasks))//DHQ: 只有一次schedule,处理所有的apply_tasks
             .unwrap();
 
         let dur = t.elapsed();
@@ -1189,7 +1189,7 @@ impl<T: Transport, C: PdClient> Store<T, C> {
             .process_ready
             .observe(duration_to_sec(dur) as f64);
 
-        self.trans.flush();//DHQ: 消息发出去？
+        self.trans.flush();//DHQ: 消息发出去
 
         slow_log!(t, "{} on {} regions raft ready", self.tag, pending_count);
     }
@@ -1546,7 +1546,7 @@ impl<T: Transport, C: PdClient> Store<T, C> {
         msg: &RaftCmdRequest,
     ) -> Result<Option<RaftCmdResponse>> {
         self.validate_store_id(msg)?;
-        if msg.has_status_request() {
+        if msg.has_status_request() {//DHQ: 比如报告自己是不是leader等
             // For status commands, we handle it here directly.
             let resp = self.execute_status_command(msg)?;
             return Ok(Some(resp));

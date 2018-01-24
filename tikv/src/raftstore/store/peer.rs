@@ -195,11 +195,11 @@ pub struct Peer {
     pub peer: metapb::Peer,
     region_id: u64,
     pub raft_group: RawNode<PeerStorage>,//DHQ: 通过RawNode，使用raft
-    proposals: ProposalQueue,//DHQ: queue是长存结构
-    apply_proposals: Vec<Proposal>,//DHQ: 动态变化
-    pending_reads: ReadIndexQueue,
+    proposals: ProposalQueue,//DHQ: 里面是ProposalMeta
+    apply_proposals: Vec<Proposal>,
+    pending_reads: ReadIndexQueue, //DHQ: ReadIndex读用
     // Record the last instant of each peer's heartbeat response.
-    pub peer_heartbeats: FlatMap<u64, Instant>,//DHQ: 每个对应peer的信息
+    pub peer_heartbeats: FlatMap<u64, Instant>,//DHQ: leader需要给每个follower发 heartbeat信息
     coprocessor_host: Arc<CoprocessorHost>,
     /// an inaccurate difference in region size since last reset.
     pub size_diff_hint: u64,
@@ -247,7 +247,7 @@ pub struct Peer {
     leader_lease_expired_time: Option<Either<Timespec, Timespec>>,
 
     // If a snapshot is being applied asynchronously, messages should not be sent.
-    pending_messages: Vec<eraftpb::Message>,
+    pending_messages: Vec<eraftpb::Message>,//DHQ: 参见post_raft_ready_append()，非leader才会填这个
 
     pub peer_stat: PeerStat,
 }
@@ -523,7 +523,7 @@ impl Peer {
         for msg in msgs {
             let msg_type = msg.get_msg_type();
 
-            self.send_raft_message(msg, trans)?;
+            self.send_raft_message(msg, trans)?; //DHQ: 这个确实会发送给peer
 
             match msg_type {
                 MessageType::MsgAppend => metrics.append += 1,
@@ -710,7 +710,7 @@ impl Peer {
         Some(region_proposal)
     }
 
-    pub fn handle_raft_ready_append<T: Transport>(
+    pub fn handle_raft_ready_append<T: Transport>(//DHQ: 处理一个region的ready
         &mut self,
         ctx: &mut ReadyContext<T>,
         worker: &FutureWorker<PdTask>,
@@ -719,7 +719,7 @@ impl Peer {
         if self.pending_remove {
             return;
         }
-        if self.mut_store().check_applying_snap() {
+        if self.mut_store().check_applying_snap() {//DHQ: 从下面comment看，这个是follower。通过延缓handle，让leader在差距过大后暂停发送？
             // If we continue to handle all the messages, it may cause too many messages because
             // leader will send all the remaining messages to this follower, which can lead
             // to full message queue under high load.
@@ -730,16 +730,16 @@ impl Peer {
             return;
         }
 
-        if !self.pending_messages.is_empty() {
+        if !self.pending_messages.is_empty() {//DHQ: 上面判端是否正在apply snap. 这些是follower才有的？reply leader的？ 
             fail_point!("raft_before_follower_send");
             let messages = mem::replace(&mut self.pending_messages, vec![]);
-            self.send(ctx.trans, messages, &mut ctx.metrics.message)//DHQ: pending的是什么消息？
+            self.send(ctx.trans, messages, &mut ctx.metrics.message)//DHQ: pending是因为apply快照而耽搁的消息？
                 .unwrap_or_else(|e| {
                     warn!("{} clear snapshot pending messages err {:?}", self.tag, e);
                 });
         }
 
-        if self.has_pending_snapshot() && !self.ready_to_handle_pending_snap() {
+        if self.has_pending_snapshot() && !self.ready_to_handle_pending_snap() {//DHQ: 处理snapshot过程中，暂停发送？ 好像没判断是否为leader
             debug!(
                 "{} [apply_idx: {}, last_applying_idx: {}] is not ready to apply snapshot.",
                 self.tag,
@@ -750,7 +750,7 @@ impl Peer {
         }
 
         if !self.raft_group
-            .has_ready_since(Some(self.last_applying_idx))
+            .has_ready_since(Some(self.last_applying_idx)) //DHQ:判断有没有任务
         {
             return;
         }
@@ -765,7 +765,7 @@ impl Peer {
 
         // The leader can write to disk and replicate to the followers concurrently
         // For more details, check raft thesis 10.2.1.
-        if self.is_leader() {
+        if self.is_leader() {//DHQ: pipeline，并发
             fail_point!("raft_before_leader_send");
             let msgs = ready.messages.drain(..);
             self.send(ctx.trans, msgs, &mut ctx.metrics.message)
@@ -775,7 +775,7 @@ impl Peer {
                 });
         }
 
-        let invoke_ctx = match self.mut_store().handle_raft_ready(ctx, &ready) {//DHQ: 里面写disk
+        let invoke_ctx = match self.mut_store().handle_raft_ready(ctx, &ready) {//DHQ: 里面把要写的内容放到 ctx的 kv_wb, raft_wb
             Ok(r) => r,
             Err(e) => {
                 // We may have written something to writebatch and it can't be reverted, so has
@@ -784,7 +784,7 @@ impl Peer {
             }
         };
 
-        ctx.ready_res.push((ready, invoke_ctx));
+        ctx.ready_res.push((ready, invoke_ctx));//DHQ: ready都放到ctx.ready_res, 外面统一处理
     }
 
     pub fn post_raft_ready_append<T: Transport>(
@@ -801,7 +801,7 @@ impl Peer {
 
         let apply_snap_result = self.mut_store().post_ready(invoke_ctx);
 
-        if !self.is_leader() {
+        if !self.is_leader() {//DHQ: 判断了不是leader, 所以pending_messages是follower专用的。
             fail_point!("raft_before_follower_send");
             if self.is_applying_snapshot() {//DHQ: 正在做snapshot，延迟发送。放到pending_messages里
                 self.pending_messages = mem::replace(&mut ready.messages, vec![]);
@@ -813,7 +813,7 @@ impl Peer {
             }
         }
 
-        if apply_snap_result.is_some() {
+        if apply_snap_result.is_some() {//DHQ: 这个 ApplyTask，是apply snapshot?
             let reg = ApplyTask::register(self);
             self.apply_scheduler.schedule(reg).unwrap();
         }
@@ -857,7 +857,7 @@ impl Peer {
 
         self.apply_reads(&ready);//DHQ:处理读
 
-        self.raft_group.advance_append(ready);//DHQ: raw_node的函数，修改raft的状态
+        self.raft_group.advance_append(ready);//DHQ: raw_node的函数，修改raft的状态. etcd的实现，无此函数
         if self.is_applying_snapshot() {
             // Because we only handle raft ready when not applying snapshot, so following
             // line won't be called twice for the same snapshot.
@@ -901,7 +901,7 @@ impl Peer {
         }
 
         if let Some(propose_time) = propose_time {
-            self.update_lease_with(propose_time);
+            self.update_lease_with(propose_time);//DHQ: 上面可能设置了propose_time，延迟读。所以需要续lease
         }
     }
 
@@ -1120,7 +1120,7 @@ impl Peer {
             }
         }
     }
-	//DHQ: 准备好了propose，放到any_proposals里面，但是没有发送
+    //DHQ: 准备好了propose，放到apply_proposals里面，但是没有发送
     fn post_propose(&mut self, mut meta: ProposalMeta, is_conf_change: bool, cb: Callback) {
         // Try to renew leader lease on every consistent read/write request.
         meta.renew_lease_time = Some(monotonic_raw_now());

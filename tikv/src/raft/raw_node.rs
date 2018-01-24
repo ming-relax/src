@@ -325,7 +325,7 @@ impl<T: Storage> RawNode<T> {
     pub fn ready(&mut self) -> Ready {
         Ready::new(&mut self.raft, &self.prev_ss, &self.prev_hs, None)
     }
-
+    //DHQ: 从appied_idx后，有ready。 实际上就是各种判断，是否有活干
     pub fn has_ready_since(&self, applied_idx: Option<u64>) -> bool {
         let raft = &self.raft;
         if !raft.msgs.is_empty() || raft.raft_log.unstable_entries().is_some() {
@@ -334,17 +334,17 @@ impl<T: Storage> RawNode<T> {
         if !raft.read_states.is_empty() {
             return true;
         }
-        if self.get_snap().map_or(false, |s| !is_empty_snap(s)) {
+        if self.get_snap().map_or(false, |s| !is_empty_snap(s)) {//DHQ: 说明有快照任务
             return true;
         }
-        let has_unapplied_entries = match applied_idx {
+        let has_unapplied_entries = match applied_idx {//DHQ: 这个说明有待apply的
             None => raft.raft_log.has_next_entries(),
             Some(idx) => raft.raft_log.has_next_entries_since(idx),
         };
-        if has_unapplied_entries {
+        if has_unapplied_entries {//DHQ: 先apply，免得太多没apply的?
             return true;
         }
-        if raft.soft_state() != self.prev_ss {
+        if raft.soft_state() != self.prev_ss {//DHQ: soft state变化，说明leader/role变更了。这个也需要处理
             return true;
         }
         let hs = raft.hard_state();

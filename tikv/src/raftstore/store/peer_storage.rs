@@ -1070,7 +1070,7 @@ impl PeerStorage {
 
     pub fn schedule_applying_snapshot(&mut self) {
         let status = Arc::new(AtomicUsize::new(JOB_STATUS_PENDING));
-        self.set_snap_state(SnapState::Applying(status.clone()));
+        self.set_snap_state(SnapState::Applying(status.clone())); //DHQ: 先设置为Applying 状态
         let task = RegionTask::Apply {
             region_id: self.get_region_id(),
             status: status,
@@ -1173,7 +1173,7 @@ impl PeerStorage {
             }
         }
 
-        self.schedule_applying_snapshot();
+        self.schedule_applying_snapshot();//DHQ: 后台执行
         let prev_region = self.region.clone();
         self.region = snap_region;
 
