@@ -267,7 +267,7 @@ pub struct PeerStorage {
     pub last_term: u64,
 
     snap_state: RefCell<SnapState>,
-    region_sched: Scheduler<RegionTask>,
+    region_sched: Scheduler<RegionTask>, //DHQ: mod.rs，定义RegionTask为相应的别名
     snap_tried_cnt: RefCell<usize>,
 
     cache: EntryCache,

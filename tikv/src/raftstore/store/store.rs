@@ -141,7 +141,7 @@ pub struct Store<T, C: 'static> {
     // the regions with pending snapshots between two mio ticks.
     pending_snapshot_regions: Vec<metapb::Region>,
     split_check_worker: Worker<SplitCheckTask>,
-    region_worker: Worker<RegionTask>,
+    region_worker: Worker<RegionTask>,//DHQ: RegionTask是 Send时的消息类型，类似于go创建Chan的类型
     raftlog_gc_worker: Worker<RaftlogGcTask>,
     compact_worker: Worker<CompactTask>,
     pd_worker: FutureWorker<PdTask>,
@@ -542,7 +542,7 @@ impl<T: Transport, C: PdClient> Store<T, C> {
         self.apply_res_receiver = Some(rx);
         box_try!(self.apply_worker.start(apply_runner));
 
-        event_loop.run(self)?;
+        event_loop.run(self)?;//DHQ: 调用event_loop的run，这个函数的逻辑在mio的event_loop的run_once里面
         Ok(())
     }
 
@@ -603,10 +603,10 @@ impl<T: Transport, C: PdClient> Store<T, C> {
                 continue;
             }
 
-            if peer.raft_group.tick() {//DHQ: raft_group的tick，不是store的tick。检查是否需要发起选举或者heartbeat的
-                peer.mark_to_be_checked(&mut self.pending_raft_groups);
+            if peer.raft_group.tick() {//DHQ: raft_group即RawNode的tick，不是store的tick。检查是否需要发起选举或者heartbeat的
+                peer.mark_to_be_checked(&mut self.pending_raft_groups);//DHQ: 有操作，放到pending_raft_groups中，后续处理
             }
-
+	    //DHQ: follower发现leader没有消息，先找PD确认自己的身份
             // If this peer detects the leader is missing for a long long time,
             // it should consider itself as a stale peer which is removed from
             // the original cluster.
@@ -634,7 +634,7 @@ impl<T: Transport, C: PdClient> Store<T, C> {
                     peer: peer.peer.clone(),
                     region: peer.region().clone(),
                 };
-                if let Err(e) = self.pd_worker.schedule(task) {//DHQ：这个函数，是不是包含了futex操作？
+                if let Err(e) = self.pd_worker.schedule(task) {//DHQ：封装成task去执行
                     error!("{} failed to notify pd: {}", peer.tag, e)
                 }
             }
@@ -2435,7 +2435,7 @@ impl<T: Transport, C: PdClient> mio::Handler for Store<T, C> {//DHQ: 这几个�
     type Timeout = Tick;
     type Message = Msg;
 
-    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Msg) {
+    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Msg) {//DHQ: 参见 mio的run_once，这个函数会调用Handler的notify
         match msg {
             Msg::RaftMessage(data) => if let Err(e) = self.on_raft_message(data) {//DHQ: on_raft_message也会修改pending_raft_groups
                 error!("{} handle raft message err: {:?}", self.tag, e);
@@ -2519,7 +2519,7 @@ impl<T: Transport, C: PdClient> mio::Handler for Store<T, C> {//DHQ: 这几个�
         }
 
         // We handle raft ready in event loop.
-        if !self.pending_raft_groups.is_empty() {//DHQ: 签名的notify，各种消息，都会插入到pending_raft_groups
+        if !self.pending_raft_groups.is_empty() {//DHQ: 前面的notify，各种消息，都会插入到pending_raft_groups
             self.on_raft_ready();//DHQ: 如果收到对方消息，那么在 notify的处理，会修改pending_raft_groups，这里再接着处理。
         }
 

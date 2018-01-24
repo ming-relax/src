@@ -287,7 +287,7 @@ impl Runner {
 }
 
 impl Runnable<Task> for Runner {
-    fn run(&mut self, task: Task) {
+    fn run(&mut self, task: Task) {//regiontask，分为gen_snapshot和apply snapshot等
         match task {
             Task::Gen {
                 region_id,

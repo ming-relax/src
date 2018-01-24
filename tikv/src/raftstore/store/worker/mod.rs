@@ -52,7 +52,7 @@ mod raftlog_gc;
 mod metrics;
 mod consistency_check;
 pub mod apply;
-
+//DHQ: RegionTask, CompactTask等，都是相应文件中Task的别名。例如region.rs中的Task，就是RegionTask
 pub use self::region::{Runner as RegionRunner, Task as RegionTask};
 pub use self::split_check::{Runner as SplitCheckRunner, Task as SplitCheckTask};
 pub use self::compact::{Runner as CompactRunner, Task as CompactTask};

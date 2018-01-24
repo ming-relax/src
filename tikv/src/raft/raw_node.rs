@@ -244,7 +244,7 @@ impl<T: Storage> RawNode<T> {
     // Tick advances the internal logical clock by a single tick.
     //
     // Returns true to indicate that there will probably be some readiness need to be handled.
-    pub fn tick(&mut self) -> bool {
+    pub fn tick(&mut self) -> bool {//DHQ: 与raft的RawNode实现不同，tick有返回值. 减少HasReady()判断?
         self.raft.tick()
     }
 
